@@ -76,24 +76,9 @@ void __hyp_text map_page_host(u64 addr)
 			}
 			else
 			{
-				if (owner != HOSTVISOR || check_host_module(addr))
-				{
-					perm = pgprot_val(PAGE_S2_KERNEL);
-					new_pte = (pfn * PAGE_SIZE) | perm;
-					mmap_s2pt(HOSTVISOR, addr, 3U, new_pte);
-				}
-				else if (!in_kint_range(addr, PUD_SIZE))
-				{
-					perm = pgprot_val(SECT_S2_KERNEL);
-					new_pte = kint_mk_pud(pfn, perm);
-					mmap_s2pt(HOSTVISOR, addr, 1U, new_pte);
-				}
-				else
-				{
-					perm = pgprot_val(SECT_S2_KERNEL);
-					new_pte = kint_mk_pmd(pfn, perm);
-					mmap_s2pt(HOSTVISOR, addr, 2U, new_pte);
-				}
+				perm = pgprot_val(PAGE_S2_KERNEL);
+				new_pte = (pfn * PAGE_SIZE) | perm;
+				mmap_s2pt(HOSTVISOR, addr, 3U, new_pte);
 			}
 		}
 #endif
