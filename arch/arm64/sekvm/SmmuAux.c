@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include "hypsec.h"
 #include "MmioOps.h"
 
@@ -11,7 +10,7 @@ u32 __hyp_text is_smmu_range(u64 addr)
 	i = 0U;
 	res = V_INVALID;
 
-	while (i < total_smmu)
+	while (i < total_smmu) 
 	{
 		base = get_smmu_base(i);
 		size = get_smmu_size(i);

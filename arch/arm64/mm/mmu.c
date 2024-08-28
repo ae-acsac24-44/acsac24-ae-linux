@@ -55,6 +55,8 @@ u64 idmap_ptrs_per_pgd = PTRS_PER_PGD;
 u64 kimage_voffset __ro_after_init;
 EXPORT_SYMBOL(kimage_voffset);
 
+static unsigned long eguard_page[(PAGE_SIZE / sizeof(unsigned long))] __block_aligned_bss;
+EXPORT_SYMBOL(eguard_page);
 /*
  * Empty_zero_page is a special page that is used for zero-initialized data
  * and COW.
@@ -65,6 +67,9 @@ EXPORT_SYMBOL(empty_zero_page);
 static pte_t bm_pte[PTRS_PER_PTE] __page_aligned_bss;
 static pmd_t bm_pmd[PTRS_PER_PMD] __page_aligned_bss __maybe_unused;
 static pud_t bm_pud[PTRS_PER_PUD] __page_aligned_bss __maybe_unused;
+
+unsigned long guard_page[PAGE_SIZE / sizeof(unsigned long)] __block_aligned_bss;
+EXPORT_SYMBOL(guard_page);
 
 pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
 			      unsigned long size, pgprot_t vma_prot)
@@ -101,6 +106,33 @@ static phys_addr_t __init early_pgtable_alloc(void)
 
 	return phys;
 }
+
+#ifdef CONFIG_VERIFIED_KVM
+static phys_addr_t __init sekvm_early_pgtable_alloc(void)
+{
+	phys_addr_t phys;
+	void *ptr;
+
+	phys = sekvm_memblock_alloc(PAGE_SIZE, PAGE_SIZE);
+
+	/*
+	 * The FIX_{PGD,PUD,PMD} slots may be in active use, but the FIX_PTE
+	 * slot will be free, so we can (ab)use the FIX_PTE slot to initialise
+	 * any level of table.
+	 */
+	ptr = pte_set_fixmap(phys);
+
+	memset(ptr, 0, PAGE_SIZE);
+
+	/*
+	 * Implicit barriers also ensure the zeroed page is visible to the page
+	 * table walker
+	 */
+	pte_clear_fixmap();
+
+	return phys;
+}
+#endif
 
 static bool pgattr_change_is_safe(u64 old, u64 new)
 {
@@ -351,7 +383,11 @@ static void __create_pgd_mapping(pgd_t *pgdir, phys_addr_t phys,
 
 static phys_addr_t pgd_pgtable_alloc(void)
 {
+#ifndef CONFIG_VERIFIED_KVM
 	void *ptr = (void *)__get_free_page(PGALLOC_GFP);
+#else
+	void *ptr = host_alloc_pt_pages(0);
+#endif
 	if (!ptr || !pgtable_page_ctor(virt_to_page(ptr)))
 		BUG();
 
@@ -382,7 +418,7 @@ void __init create_pgd_mapping(struct mm_struct *mm, phys_addr_t phys,
 			       pgprot_t prot, bool page_mappings_only)
 {
 	int flags = 0;
-
+	
 	BUG_ON(mm == &init_mm);
 
 	if (page_mappings_only)
@@ -412,7 +448,11 @@ static void __init __map_memblock(pgd_t *pgdp, phys_addr_t start,
 				  phys_addr_t end, pgprot_t prot, int flags)
 {
 	__create_pgd_mapping(pgdp, start, __phys_to_virt(start), end - start,
+#ifdef CONFIG_VERIFIED_KVM
+			     prot, sekvm_early_pgtable_alloc, flags);
+#else
 			     prot, early_pgtable_alloc, flags);
+#endif
 }
 
 void __init mark_linear_text_alias_ro(void)
@@ -517,7 +557,11 @@ static void __init map_kernel_segment(pgd_t *pgdp, void *va_start, void *va_end,
 	BUG_ON(!PAGE_ALIGNED(size));
 
 	__create_pgd_mapping(pgdp, pa_start, (unsigned long)va_start, size, prot,
+#ifdef CONFIG_VERIFIED_KVM
+			     sekvm_early_pgtable_alloc, flags);
+#else
 			     early_pgtable_alloc, flags);
+#endif
 
 	if (!(vm_flags & VM_NO_GUARD))
 		size += PAGE_SIZE;

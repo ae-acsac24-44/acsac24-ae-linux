@@ -26,6 +26,10 @@ unsigned int arch_mod_section_prepend(struct module *mod, unsigned int section);
    sections.  Returns NULL on failure. */
 void *module_alloc(unsigned long size);
 
+#ifdef CONFIG_VERIFIED_KVM
+void *sekvm_module_alloc(unsigned long flag, unsigned long size);
+#endif
+
 /* Free memory returned from module_alloc. */
 void module_memfree(void *module_region);
 

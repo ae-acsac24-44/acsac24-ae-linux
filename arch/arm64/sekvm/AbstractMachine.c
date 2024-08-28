@@ -1,11 +1,10 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include "hypsec.h"
 #include "hacl-20/Hacl_Ed25519.h"
 #include "hacl-20/Hacl_AES.h"
 
 void __hyp_text v_panic(void)
 {
-	//__hyp_panic();
+	
 	u32 vmid = get_cur_vmid();
 	u32 vcpuid = get_cur_vcpu_id();
 	if (vmid) {
@@ -15,7 +14,8 @@ void __hyp_text v_panic(void)
 		print_string("\rhost\n");
 		printhex_ul(read_sysreg(elr_el2));
 	}
-	printhex_ul(ESR_ELx_EC(read_sysreg(esr_el2)));
+	printhex_ul(read_sysreg(esr_el2));
+	__hyp_panic();
 }
 
 void __hyp_text clear_phys_mem(u64 pfn)

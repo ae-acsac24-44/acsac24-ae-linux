@@ -76,6 +76,17 @@
 #define HVC_SMMU_LPAE_IOVA_TO_PHYS 26
 #define HVC_SMMU_CLEAR 27
 #define	HVC_PHYS_ADDR_IOREMAP 28
+
+#ifdef CONFIG_KERNEL_INT
+/* Instruction */
+#define HVC_MLOAD 30
+#define HVC_MFREE 31
+#define HVC_MOD_INIT_FREE 32
+#define HVC_ALLOC_EL0_PGD 33
+#define HVC_FREE_EL0_PGD 34
+#endif
+#define HVC_DO_SWITCH_MM 35
+
 #endif
 
 /* Error returned when an invalid stub number is passed into x0 */
@@ -110,7 +121,7 @@ void enable_stage2_translation(phys_addr_t vttbr_base);
 #endif
 
 /* Reports the availability of HYP mode */
-static inline bool is_hyp_mode_available(void)
+static inline bool is_hyp_mode_available(void) 
 {
 	return (__boot_cpu_mode[0] == BOOT_CPU_MODE_EL2 &&
 		__boot_cpu_mode[1] == BOOT_CPU_MODE_EL2);

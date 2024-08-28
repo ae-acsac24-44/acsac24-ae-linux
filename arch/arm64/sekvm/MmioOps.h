@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ARM_VERIFIED_MMIO__
 #define __ARM_VERIFIED_MMIO__
 

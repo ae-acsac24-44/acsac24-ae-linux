@@ -67,6 +67,8 @@
 #include <uapi/linux/module.h>
 #include "module-internal.h"
 
+#include <asm/hypsec_host.h>
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/module.h>
 
@@ -87,6 +89,10 @@
 
 /* If this is set, the section belongs in the init part of the module */
 #define INIT_OFFSET_MASK (1UL << (BITS_PER_LONG-1))
+#ifdef CONFIG_VERIFIED_KVM
+#define SEKVM_TEXT_OFFSET_MASK (1UL << (BITS_PER_LONG-2))
+#define SEKVM_RO_OFFSET_MASK (1UL << (BITS_PER_LONG-3))
+#endif
 
 /*
  * Mutex protects:
@@ -373,6 +379,30 @@ static unsigned int find_sec(const struct load_info *info, const char *name)
 	}
 	return 0;
 }
+
+#ifdef CONFIG_KERNEL_INT
+/*
+ * FIXME: hardcoded from now.
+ *  It would be better to dynamically change the number of sections
+ *  that need verification.
+ */
+#define MAX_VERIFY_SECTION_SIZE 100
+u32 *checklists;
+static u32 verify_entsize;
+static int hyp_checksum(struct module *mod, struct load_info *info)
+{	
+	int ret;
+
+	if (!checklists || verify_entsize == 0 || verify_entsize > MAX_VERIFY_SECTION_SIZE)
+			return -1;
+	ret = el2_mod_checksum((unsigned long)(info->hdr), (unsigned long)(mod->percpu),
+					(unsigned long)(&mod->arch), (unsigned long)(checklists), verify_entsize);
+
+	if (ret >= 0)
+			mod->arch.kint_modid = ret;
+	return (ret >= 0)? 0: -1;
+}
+#endif
 
 /* Find a module section, or NULL. */
 static void *section_addr(const struct load_info *info, const char *name)
@@ -1024,6 +1054,10 @@ SYSCALL_DEFINE2(delete_module, const char __user *, name_user,
 
 	/* Store the name of the last unloaded module for diagnostic purposes */
 	strlcpy(last_unloaded_module, mod->name, sizeof(last_unloaded_module));
+
+#ifdef CONFIG_KERNEL_INT
+	ret = hyp_free_module(mod->arch.kint_modid);
+#endif
 
 	free_module(mod);
 	return 0;
@@ -2271,6 +2305,7 @@ static int simplify_symbols(struct module *mod, const struct load_info *info)
 			break;
 
 		case SHN_UNDEF:
+#ifndef CONFIG_KERNEL_INT
 			ksym = resolve_symbol_wait(mod, info, name);
 			/* Ok if resolved.  */
 			if (ksym && !IS_ERR(ksym)) {
@@ -2285,15 +2320,18 @@ static int simplify_symbols(struct module *mod, const struct load_info *info)
 			pr_warn("%s: Unknown symbol %s (err %li)\n",
 				mod->name, name, PTR_ERR(ksym));
 			ret = PTR_ERR(ksym) ?: -ENOENT;
+#endif
 			break;
 
 		default:
 			/* Divert to percpu allocation if a percpu var. */
+#ifndef CONFIG_KERNEL_INT
 			if (sym[i].st_shndx == info->index.pcpu)
 				secbase = (unsigned long)mod_percpu(mod);
 			else
 				secbase = info->sechdrs[sym[i].st_shndx].sh_addr;
 			sym[i].st_value += secbase;
+#endif
 			break;
 		}
 	}
@@ -2326,8 +2364,10 @@ static int apply_relocations(struct module *mod, const struct load_info *info)
 			err = apply_relocate(info->sechdrs, info->strtab,
 					     info->index.sym, i, mod);
 		else if (info->sechdrs[i].sh_type == SHT_RELA)
+#ifndef CONFIG_KERNEL_INT
 			err = apply_relocate_add(info->sechdrs, info->strtab,
 						 info->index.sym, i, mod);
+#endif
 		if (err < 0)
 			break;
 	}
@@ -2389,6 +2429,7 @@ static void layout_sections(struct module *mod, struct load_info *info)
 			s->sh_entsize = get_offset(mod, &mod->core_layout.size, s, i);
 			pr_debug("\t%s\n", sname);
 		}
+
 		switch (m) {
 		case 0: /* executable */
 			mod->core_layout.size = debug_align(mod->core_layout.size);
@@ -2421,7 +2462,6 @@ static void layout_sections(struct module *mod, struct load_info *info)
 				continue;
 			s->sh_entsize = (get_offset(mod, &mod->init_layout.size, s, i)
 					 | INIT_OFFSET_MASK);
-			pr_debug("\t%s\n", sname);
 		}
 		switch (m) {
 		case 0: /* executable */
@@ -2672,7 +2712,6 @@ static void add_kallsyms(struct module *mod, const struct load_info *info)
 
 	/* Set up to point into init section. */
 	mod->kallsyms = mod->init_layout.base + info->mod_kallsyms_init_off;
-
 	mod->kallsyms->symtab = (void *)symsec->sh_addr;
 	mod->kallsyms->num_symtab = symsec->sh_size / sizeof(Elf_Sym);
 	/* Make sure we get permanent strtab: don't use info->strtab. */
@@ -2881,8 +2920,18 @@ static int copy_module_from_user(const void __user *umod, unsigned long len,
 		return err;
 
 	/* Suck in entire file: we'll want most of it. */
+#ifndef CONFIG_KERNEL_INT
 	info->hdr = __vmalloc(info->len,
 			GFP_KERNEL | __GFP_NOWARN, PAGE_KERNEL);
+#else
+	/*
+	 * If we applied default vmalloc API for module, it possibly
+	 * already injected writable stage 2 page in same 2mb-aligned
+	 * block which can bypass the remapped write-protected permission
+	 * applied to block during module authentication.
+	 */
+	info->hdr = sekvm_module_alloc(VM_SEKVM_RO | VM_SEKVM_TMP, info->len);
+#endif
 	if (!info->hdr)
 		return -ENOMEM;
 
@@ -2974,6 +3023,7 @@ static struct module *setup_load_info(struct load_info *info, int flags)
 				+ info->sechdrs[info->index.str].sh_offset;
 			break;
 		}
+
 	}
 
 	info->index.mod = find_sec(info, ".gnu.linkonce.this_module");
@@ -3139,14 +3189,176 @@ static int find_module_sections(struct module *mod, struct load_info *info)
 
 	return 0;
 }
+#ifdef CONFIG_VERIFIED_KVM
+static void *sekvm_mod_text_base;
+static void *sekvm_mod_ro_base;
+static u64 sekvm_core_text_size;
+static u64 sekvm_core_ro_size;
+static u64 sekvm_init_text_size;
+static u64 sekvm_init_ro_size;
+
+static void sekvm_divide_section(struct load_info *info)
+{
+	sekvm_core_text_size = sekvm_core_ro_size = 0UL;
+	sekvm_init_text_size = sekvm_init_ro_size = 0UL;
+	verify_entsize = 0U;
+	checklists = NULL;
+
+	/* NOTE: we only divide text and ro section */
+	static unsigned long const masks[][2] = {
+		{ SHF_EXECINSTR | SHF_ALLOC, 0 },
+		{ SHF_ALLOC, SHF_WRITE },
+	};
+
+	unsigned int m, i, k;
+	long ret;
+	unsigned int symidx, stridx;
+	symidx = info->index.sym;
+	stridx = info->index.str;
+
+	Elf_Shdr *symsect = info->sechdrs + symidx;
+	Elf_Shdr *strsect = info->sechdrs + stridx;
+
+#ifdef CONFIG_KERNEL_INT
+	/* Allocate a page to store verify sections information */
+	checklists = (unsigned int *)__vmalloc(PAGE_SIZE,
+					GFP_KERNEL | __GFP_NOWARN, PAGE_KERNEL);
+	if (!checklists)
+		return;
+	memset(checklists, 0, PAGE_SIZE);
+
+	k = 0;
+#endif
+	for(m = 0; m < ARRAY_SIZE(masks); ++m) {
+
+		unsigned long core_size;
+		core_size = 0UL;
+
+		for (i = 0; i < info->hdr->e_shnum; ++i) {
+			Elf_Shdr *s = &info->sechdrs[i];
+			const char *sname = info->secstrings + s->sh_name;
+
+			if ((s->sh_flags & masks[m][0]) != masks[m][0]
+			    || (s->sh_flags & masks[m][1])
+				|| (s->sh_entsize & (SEKVM_TEXT_OFFSET_MASK | SEKVM_RO_OFFSET_MASK))
+				|| strstarts(sname, ".init")
+				|| (i == symidx) || (i == stridx))
+				continue;
+
+			s->sh_entsize = ALIGN(core_size, s->sh_addralign ?: 1);
+			core_size = s->sh_entsize + s->sh_size;
+#ifdef CONFIG_KERNEL_INT
+			checklists[k++] = i;
+#endif
+			if (m == 0)
+				s->sh_entsize |= SEKVM_TEXT_OFFSET_MASK;
+			else
+				s->sh_entsize |= SEKVM_RO_OFFSET_MASK;
+		}
+
+		switch (m) {
+		case 0: /* executable */
+			sekvm_core_text_size = ALIGN(core_size, PAGE_SIZE);
+			break;
+		case 1: /* RO: text and ro-data */
+			sekvm_core_ro_size = ALIGN(core_size, PAGE_SIZE);
+			break;
+		}
+	}
+
+	for(m = 0; m < ARRAY_SIZE(masks); ++m) {
+
+		unsigned long init_size;
+		init_size = 0UL;
+
+		for (i = 0; i < info->hdr->e_shnum; ++i) {
+			Elf_Shdr *s = &info->sechdrs[i];
+			const char *sname = info->secstrings + s->sh_name;
+
+			if ((s->sh_flags & masks[m][0]) != masks[m][0]
+			    || (s->sh_flags & masks[m][1])
+				|| (s->sh_entsize & (SEKVM_TEXT_OFFSET_MASK | SEKVM_RO_OFFSET_MASK))
+				|| !strstarts(sname, ".init")
+				|| (i == symidx) || (i == stridx))
+				continue;
+
+			s->sh_entsize = ALIGN(init_size, s->sh_addralign ?: 1);
+			init_size = s->sh_entsize + s->sh_size;
+
+#ifdef CONFIG_KERNEL_INT
+			checklists[k++] = i;
+#endif
+			s->sh_entsize |= INIT_OFFSET_MASK;
+			if (m == 0)
+				s->sh_entsize |= SEKVM_TEXT_OFFSET_MASK;
+			else
+				s->sh_entsize |= SEKVM_RO_OFFSET_MASK;
+		}
+
+		switch (m) {
+		case 0: /* executable */
+			sekvm_init_text_size = ALIGN(init_size, PAGE_SIZE);
+			break;
+		case 1: /* RO: text and ro-data */
+			sekvm_init_ro_size = ALIGN(init_size, PAGE_SIZE);
+			break;
+		}
+	}
+
+
+#ifdef CONFIG_KALLSYMS
+	/* init */
+	symsect->sh_entsize = ALIGN(sekvm_init_ro_size, symsect->sh_addralign?: 1);
+	sekvm_init_ro_size = symsect->sh_entsize + symsect->sh_size;
+	symsect->sh_entsize |= (INIT_OFFSET_MASK | SEKVM_RO_OFFSET_MASK);
+
+	strsect->sh_entsize = ALIGN(sekvm_init_ro_size, strsect->sh_addralign?: 1);
+	sekvm_init_ro_size = strsect->sh_entsize + strsect->sh_size;
+	sekvm_init_ro_size = ALIGN(sekvm_init_ro_size, PAGE_SIZE);
+	strsect->sh_entsize |= (INIT_OFFSET_MASK | SEKVM_RO_OFFSET_MASK);
+#endif
+
+#ifdef CONFIG_KERNEL_INT
+	/*
+	 * By default, we might not trust host apply relocation
+	 * on protected sections. Therefore, we may also verify
+	 * the symtab and relocation info sections:
+	 * (sh_type == SHT_RELA || sh_type == SHT_SYMTAB)
+	 * that use to resolve symbol and apply relocation on
+	 * protected sections.
+	 *
+	 * We can choose not to do this, but in our design,
+	 * not including it now will result in verification failure.
+	 */
+#ifdef CONFIG_KALLSYMS
+	checklists[k++] = info->index.sym;
+	checklists[k++] = info->index.str;
+#endif
+	for(i = 0; i < info->hdr->e_shnum; ++i){
+		Elf_Shdr *s = &info->sechdrs[i];
+		if (s->sh_type == SHT_RELA) {
+			for (m = 0; m < k; ++m) {
+				if (s->sh_info == checklists[m]) {
+					checklists[k++] = i;
+					break;
+				}
+			}
+		}
+	}
+	verify_entsize = k;
+}
+#endif
+#endif	/* CONFIG_VERIFIED_KVM */
 
 static int move_module(struct module *mod, struct load_info *info)
 {
+
 	int i;
 	void *ptr;
 
 	/* Do the allocs. */
 	ptr = module_alloc(mod->core_layout.size);
+
 	/*
 	 * The pointer to this block is stored in the module structure
 	 * which is inside the block. Just mark it as not being a
@@ -3159,6 +3371,40 @@ static int move_module(struct module *mod, struct load_info *info)
 	memset(ptr, 0, mod->core_layout.size);
 	mod->core_layout.base = ptr;
 
+#ifdef CONFIG_VERIFIED_KVM
+	sekvm_divide_section(info);
+	/* Just ensure it, we need to shift offset about init sections */
+	BUG_ON(!PAGE_ALIGNED(sekvm_core_text_size));
+	BUG_ON(!PAGE_ALIGNED(sekvm_core_ro_size));
+
+#ifdef CONFIG_KERNEL_INT
+	if (!checklists)
+		return -ENOMEM;
+#endif
+	/* text*/
+	ptr = sekvm_module_alloc(VM_SEKVM_TXT, sekvm_core_text_size + sekvm_init_text_size);
+	kmemleak_not_leak(ptr);
+	if (!ptr) {
+		module_memfree(mod->core_layout.base);
+		return -ENOMEM;
+	}
+
+	memset(ptr, 0, sekvm_core_text_size + sekvm_init_text_size);
+	sekvm_mod_text_base = ptr;
+
+	/* ro */
+	ptr = sekvm_module_alloc(VM_SEKVM_RO, sekvm_core_ro_size + sekvm_init_ro_size);
+	kmemleak_not_leak(ptr);
+	if (!ptr) {
+		module_memfree(mod->core_layout.base);
+		module_memfree(sekvm_mod_text_base);
+		return -ENOMEM;
+	}
+
+	memset(ptr, 0, sekvm_core_ro_size + sekvm_init_ro_size);
+	sekvm_mod_ro_base = ptr;
+#endif
+
 	if (mod->init_layout.size) {
 		ptr = module_alloc(mod->init_layout.size);
 		/*
@@ -3170,8 +3416,11 @@ static int move_module(struct module *mod, struct load_info *info)
 		kmemleak_ignore(ptr);
 		if (!ptr) {
 			module_memfree(mod->core_layout.base);
+			module_memfree(sekvm_mod_text_base);
+			module_memfree(sekvm_mod_ro_base);
 			return -ENOMEM;
 		}
+
 		memset(ptr, 0, mod->init_layout.size);
 		mod->init_layout.base = ptr;
 	} else
@@ -3186,14 +3435,45 @@ static int move_module(struct module *mod, struct load_info *info)
 		if (!(shdr->sh_flags & SHF_ALLOC))
 			continue;
 
+#ifndef CONFIG_VERIFIED_KVM
 		if (shdr->sh_entsize & INIT_OFFSET_MASK)
 			dest = mod->init_layout.base
 				+ (shdr->sh_entsize & ~INIT_OFFSET_MASK);
 		else
 			dest = mod->core_layout.base + shdr->sh_entsize;
-
+#else
+		if (shdr->sh_entsize & SEKVM_TEXT_OFFSET_MASK)
+		{
+			shdr->sh_entsize &= ~SEKVM_TEXT_OFFSET_MASK;
+			if (shdr->sh_entsize & INIT_OFFSET_MASK)
+				/* Shift offset of core text size */
+				dest = sekvm_mod_text_base + sekvm_core_text_size
+					+ (shdr->sh_entsize & ~INIT_OFFSET_MASK);
+			else
+				dest = sekvm_mod_text_base + shdr->sh_entsize;
+		}
+		else if (shdr->sh_entsize & SEKVM_RO_OFFSET_MASK)
+		{
+			shdr->sh_entsize &= ~SEKVM_RO_OFFSET_MASK;
+			if (shdr->sh_entsize & INIT_OFFSET_MASK)
+				/* Shift offset of core ro size */
+				dest = sekvm_mod_ro_base + sekvm_core_ro_size
+					+ (shdr->sh_entsize & ~INIT_OFFSET_MASK);
+			else
+				dest = sekvm_mod_ro_base + shdr->sh_entsize;
+		}
+		else
+		{
+			if (shdr->sh_entsize & INIT_OFFSET_MASK)
+				dest = mod->init_layout.base
+					+ (shdr->sh_entsize & ~INIT_OFFSET_MASK);
+			else
+				dest = mod->core_layout.base + shdr->sh_entsize;
+		}
+#endif
 		if (shdr->sh_type != SHT_NOBITS)
 			memcpy(dest, (void *)shdr->sh_addr, shdr->sh_size);
+
 		/* Update sh_addr to point to copy in image. */
 		shdr->sh_addr = (unsigned long)dest;
 		pr_debug("\t0x%lx %s\n",
@@ -3263,6 +3543,11 @@ static void flush_module_icache(const struct module *mod)
 				   + mod->init_layout.size);
 	flush_icache_range((unsigned long)mod->core_layout.base,
 			   (unsigned long)mod->core_layout.base + mod->core_layout.size);
+#ifdef CONFIG_VERIFIED_KVM
+	flush_icache_range((unsigned long)sekvm_mod_text_base,
+					(unsigned long)sekvm_mod_text_base
+					+ sekvm_core_text_size + sekvm_init_text_size);
+#endif
 
 	set_fs(old_fs);
 }
@@ -3490,6 +3775,10 @@ static noinline int do_init_module(struct module *mod)
 	if (!mod->async_probe_requested && (current->flags & PF_USED_ASYNC))
 		async_synchronize_full();
 
+
+#ifdef CONFIG_KERNEL_INT
+	ret = hyp_unload_init_mod(mod->arch.kint_modid);
+#endif
 	ftrace_free_mem(mod, mod->init_layout.base, mod->init_layout.base +
 			mod->init_layout.size);
 	mutex_lock(&module_mutex);
@@ -3527,6 +3816,9 @@ static noinline int do_init_module(struct module *mod)
 	return 0;
 
 fail_free_freeinit:
+#ifdef CONFIG_KERNEL_INT
+	ret = hyp_unload_init_mod(mod->arch.kint_modid);
+#endif
 	kfree(freeinit);
 fail:
 	/* Try to protect us from buggy refcounters. */
@@ -3659,6 +3951,7 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	struct module *mod;
 	long err;
 	char *after_dashes;
+	int i; 
 
 	err = module_sig_check(info, flags);
 	if (err)
@@ -3693,7 +3986,7 @@ static int load_module(struct load_info *info, const char __user *uargs,
 #endif
 
 	/* To avoid stressing percpu allocator, do this once we're unique. */
-	err = percpu_modalloc(mod, info);
+	err = percpu_modalloc(mod, info); 
 	if (err)
 		goto unlink_mod;
 
@@ -3717,12 +4010,21 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	/* Set up MODINFO_ATTR fields */
 	setup_modinfo(mod, info);
 
+#ifdef CONFIG_KERNEL_INT
+	err = hyp_checksum(mod, info);
+	vfree(checklists);
+	if (err < 0)
+		goto hyp_checksum_fail;
+
+#endif
+	
 	/* Fix up syms, so that st_value is a pointer to location. */
 	err = simplify_symbols(mod, info);
 	if (err < 0)
 		goto free_modinfo;
 
-	err = apply_relocations(mod, info);
+	err = apply_relocations(mod, info);  // random modification might come from here : 
+										 // We seems to have random modification of instruction
 	if (err < 0)
 		goto free_modinfo;
 
@@ -3809,6 +4111,8 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	kfree(mod->args);
  free_arch_cleanup:
 	module_arch_cleanup(mod);
+ hyp_checksum_fail:
+	printk("Hyp checksum failed, Je sais pas comment cancel le module loading\n");
  free_modinfo:
 	free_modinfo(mod);
  free_unload:
@@ -3875,6 +4179,12 @@ SYSCALL_DEFINE3(finit_module, int, fd, const char __user *, uargs, int, flags)
 		return err;
 	info.hdr = hdr;
 	info.len = size;
+#ifdef CONFIG_KERNEL_INT
+	/* FIXME: Move the file to SeKVM allocate region. So dirty..Weeeee*/
+	info.hdr = sekvm_module_alloc(VM_SEKVM_RO | VM_SEKVM_TMP, info.len);
+	memcpy(info.hdr, hdr, info.len);
+	vfree(hdr);
+#endif
 
 	return load_module(&info, uargs, flags);
 }

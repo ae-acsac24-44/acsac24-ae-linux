@@ -36,3 +36,9 @@ obj-y += MmioSPTWalk.o
 obj-y += MmioSPTOps.o
 obj-y += TrapDispatcher.o
 obj-y += FaultHandler.o
+obj-y += HostSysRegsHandler.o
+obj-y += HostPtSwitch.o
+
+
+
+core-$(CONFIG_VERIFIED_KVM) += arch/arm64/sekvm/

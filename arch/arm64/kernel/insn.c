@@ -397,7 +397,6 @@ u32 __kprobes aarch64_insn_encode_immediate(enum aarch64_insn_imm_type type,
 
 	if (insn == AARCH64_BREAK_FAULT)
 		return AARCH64_BREAK_FAULT;
-
 	switch (type) {
 	case AARCH64_INSN_IMM_ADR:
 		shift = 0;

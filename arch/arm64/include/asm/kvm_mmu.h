@@ -471,6 +471,12 @@ static inline int kvm_map_vectors(void)
 
 	return 0;
 }
+
+static inline void *kvm_get_vm_vector(void)
+{
+	return kern_hyp_va(kvm_ksym_ref(__kvm_vm_vector));
+}
+
 #else
 static inline void *kvm_get_hyp_vector(void)
 {

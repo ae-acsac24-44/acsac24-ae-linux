@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/types.h>
 #include <asm/kvm_asm.h>
 #include <asm/kvm_hyp.h>
@@ -147,7 +146,7 @@ void __hyp_text print_string(char *input)
 	stage2_spin_unlock(&el2_data->console_lock);
 }
 
-void __hyp_text el2_memset(void *b, int c, int len)
+void __hyp_text __attribute__((optimize("O0"))) el2_memset(void *b, int c, int len)
 {
 	char *s = b;
 

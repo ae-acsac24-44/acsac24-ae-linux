@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include "hypsec.h"
 
 /*
@@ -8,7 +7,7 @@
 void __hyp_text map_page_host(u64 addr)
 {
 	u64 pfn, new_pte, perm;
-	u32 owner, count;
+	u32 owner, count, subowner;
 
 	pfn = addr / PAGE_SIZE;
 	new_pte = 0UL;
@@ -16,6 +15,7 @@ void __hyp_text map_page_host(u64 addr)
 	acquire_lock_s2page();
 	owner = get_pfn_owner(pfn);
 	count = get_pfn_count(pfn);
+
 	//uncomment the following for m400
 	//if (!(addr >= 0x4000000000 && addr < 0x5000000000)) {
 	if (owner == INVALID_MEM)
@@ -27,15 +27,80 @@ void __hyp_text map_page_host(u64 addr)
 	}
 	else
 	{
+#ifndef CONFIG_KERNEL_INT
 		if (owner == HOSTVISOR || count > 0U)
 		{
 			perm = pgprot_val(PAGE_S2_KERNEL);
 			new_pte = (pfn * PAGE_SIZE) | perm;
 			mmap_s2pt(HOSTVISOR, addr, 3U, new_pte);
 		}
+#else
+		subowner = get_pfn_subowner(pfn);
+		if (owner == HOSTVISOR || count > 0UL)
+		{	
+			if (subowner == EL1_KCODE)
+			{	
+				perm = pgprot_val(SECT_S2_KCODE);
+				new_pte = kint_mk_pmd(pfn, perm);
+				mmap_s2pt(HOSTVISOR, addr, 2U, new_pte);
+			} else if ((subowner >= EL1_PGD && subowner <= EL1_PTE) || subowner == EL0_PGD) {
+				if (check_host_s1pgtable(addr)) {
+					perm = pgprot_val(SECT_S2);
+					new_pte = kint_mk_pmd(pfn, perm);
+					mmap_s2pt(HOSTVISOR, addr, 2U, new_pte);
+				}
+				else
+				{
+					perm = pgprot_val(PAGE_S2);
+					new_pte = (pfn * PAGE_SIZE) | perm;
+					mmap_s2pt(HOSTVISOR, addr, 3U, new_pte);
+				}
+			} else if (subowner == EL1_RODATA) {
+				if (check_host_vdso(addr)) {
+					perm = pgprot_val(PAGE_S2_KCODE);
+					new_pte = (pfn * PAGE_SIZE) | perm;
+					mmap_s2pt(HOSTVISOR, addr, 3U, new_pte);
+				} else {
+					perm = pgprot_val(PAGE_S2);
+					new_pte = (pfn * PAGE_SIZE) | perm;
+					mmap_s2pt(HOSTVISOR, addr, 3U, new_pte);
+				}
+			} else if (subowner == EL1_DATA) {
+				perm = pgprot_val(SECT_S2P);
+				new_pte = kint_mk_pmd(pfn, perm);
+				mmap_s2pt(HOSTVISOR, addr, 2U, new_pte);
+			} else if (subowner == EL1_INIT) {
+				perm = pgprot_val(SECT_S2_KERNEL);
+				new_pte = kint_mk_pmd(pfn, perm);
+				mmap_s2pt(HOSTVISOR, addr, 2U, new_pte);
+			}
+			else
+			{
+				if (owner != HOSTVISOR || check_host_module(addr))
+				{
+					perm = pgprot_val(PAGE_S2_KERNEL);
+					new_pte = (pfn * PAGE_SIZE) | perm;
+					mmap_s2pt(HOSTVISOR, addr, 3U, new_pte);
+				}
+				else if (!in_kint_range(addr, PUD_SIZE))
+				{
+					perm = pgprot_val(SECT_S2_KERNEL);
+					new_pte = kint_mk_pud(pfn, perm);
+					mmap_s2pt(HOSTVISOR, addr, 1U, new_pte);
+				}
+				else
+				{
+					perm = pgprot_val(SECT_S2_KERNEL);
+					new_pte = kint_mk_pmd(pfn, perm);
+					mmap_s2pt(HOSTVISOR, addr, 2U, new_pte);
+				}
+			}
+		}
+#endif
 		else
 		{
 			print_string("\rfaults on host\n");
+			printhex_ul(owner);
 			v_panic();
 		}
 	}
@@ -129,6 +194,7 @@ void __hyp_text map_pfn_vm(u32 vmid, u64 addr, u64 pte, u32 level)
 		pte = paddr | perm;
 		pte &= ~PMD_TABLE_BIT;
 		mmap_s2pt(vmid, addr, 2U, pte);
+
 	}
 	else if (level == 3U)
 	{
@@ -240,6 +306,14 @@ void __hyp_text update_smmu_page(u32 vmid, u32 cbndx, u32 index, u64 iova, u64 p
 		map_spt(cbndx, index, iova, pte);
 		if (owner == HOSTVISOR)
 		{
+#ifdef CONFIG_KERNEL_INT
+			u32 subowner;
+			subowner = get_pfn_subowner(pfn);
+			if (subowner != NONE) {
+				print_string("\r Map to protected memory page\n");
+				v_panic();
+			}
+#endif
 			count = get_pfn_count(pfn);
 			if (count < EL2_SMMU_CFG_SIZE)
 			{

@@ -580,4 +580,12 @@ void kvm_vcpu_put_sysregs(struct kvm_vcpu *vcpu);
 struct kvm *kvm_arch_alloc_vm(void);
 void kvm_arch_free_vm(struct kvm *kvm);
 
+#ifdef CONFIG_VERIFIED_KVM
+void __init early_sekvm_hyp_reserve(void);
+void __init sekvm_divide_reserve_mem(void);
+#else
+static inline void early_sekvm_hyp_reserve(void) { }
+static inline void sekvm_divide_reserve_mem(void) { }
+#endif
+
 #endif /* __ARM64_KVM_HOST_H__ */

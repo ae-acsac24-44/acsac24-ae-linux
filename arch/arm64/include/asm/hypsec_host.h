@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ARM_STAGE2_H__
 #define __ARM_STAGE2_H__
 #include <linux/memblock.h>
@@ -10,6 +9,10 @@
 #include <asm/hypsec_mmio.h>
 #include <asm/kvm_mmu.h>
 #include <asm/hypsec_constant.h>
+
+#ifdef CONFIG_KERNEL_INT
+#include <asm/module.h>
+#endif
 
 /* Handler for ACTLR_EL1 is not defined */
 #define SHADOW_SYS_REGS_SIZE		(DISR_EL1)
@@ -83,6 +86,41 @@ struct el2_vm_info {
 	unsigned long used_pages;
 };
 
+struct el2_mod_sec
+{
+	/* core */
+	u64 text_base;
+	u64 text_size; 
+	u64	ro_base; 
+	u64 ro_size; 
+	/* init */
+	u64 init_text_base;
+	u64 init_text_size;
+};
+
+struct el2_mod_tabs
+{
+	u64 syms;
+	u32 num_syms;
+	u64 gpl_syms;
+	u32 num_gpl_syms;
+};
+
+struct el2_mod
+{
+	struct el2_mod_sec mod_sec;
+	struct el2_mod_tabs mod_tabs;
+	bool in_use;
+};
+
+struct ksym_tab
+{
+	unsigned long start_ksymtab;
+	unsigned long stop_ksymtab;
+	unsigned long start_ksymtab_gpl;
+	unsigned long stop_ksymtab_gpl;
+};
+
 struct el2_data {
 	struct memblock_region regions[32];
 	struct s2_memblock_info s2_memblock_info[32];
@@ -103,6 +141,10 @@ struct el2_data {
 	arch_spinlock_t console_lock;
 	arch_spinlock_t smmu_lock;
 	arch_spinlock_t spt_lock;
+
+#ifdef CONFIG_KERNEL_INT
+	arch_spinlock_t host_kpt_lock; 
+#endif
 
 	kvm_pfn_t ram_start_pfn;
 	struct s2_page s2_pages[S2_PFN_SIZE];
@@ -140,6 +182,44 @@ struct el2_data {
 
 	u64 phys_mem_start;
 	u64 phys_mem_size;
+
+	u64 host_ttbr1;
+	u64 host_tcr_flag;
+
+	/* host reserved empty 4KB page */
+	u64 host_zero_page;
+
+	u64 host_s1_mem_base;
+	u64 host_s1_mem_size;
+
+	u64 host_s1_pgtable_mem_base;
+	u64 host_s1_pgtable_mem_size;
+
+	u64 host_s1_module_ro_base;
+	u64 host_s1_module_ro_size;
+
+	u64 host_s1_module_text_base;
+	u64 host_s1_module_text_size;
+
+#ifdef CONFIG_KERNEL_INT
+
+	struct el2_mod mod_info[EL2_MOD_INFO_SIZE];
+	unsigned long next_modid; 
+	unsigned long text;
+	unsigned long etext;
+	unsigned long rodata;
+	unsigned long erodata;
+	unsigned long vdso_start;
+	unsigned long vdso_end;
+	unsigned long init_text_begin; 
+	unsigned long init_text_end; 
+	unsigned long data;
+	unsigned long edata;
+	unsigned long kimage_voff; 
+
+	struct ksym_tab kernel_symtab; 
+#endif
+
 };
 
 void init_el2_data_page(void);
@@ -202,6 +282,13 @@ extern void el2_arm_lpae_map(u64 iova, phys_addr_t paddr, u64 prot, u32 cbndx, u
 extern phys_addr_t el2_arm_lpae_iova_to_phys(u64 iova, u32 cbndx, u32 num);
 extern void el2_smmu_clear(u64 iova, u32 cbndx, u32 num);
 extern void hypsec_phys_addr_ioremap(u32 vmid, u64 gpa, u64 pa, u64 size);
+
+extern u32 el2_mod_checksum(u64 p_hdr, u64 mod_percpu, u64 mod_arch, u64 checklists, u32 entsize);
+extern u32 hyp_free_module(u32 mod_id);
+extern u32 hyp_unload_init_mod(u32 mod_id);
+extern void hyp_alloc_el0_pgd(u64 addr);
+extern void hyp_free_el0_pgd(u64 addr);
+
 
 extern void el2_boot_from_inc_exe(u32 vmid);
 extern bool el2_use_inc_exe(u32 vmid);
@@ -371,7 +458,9 @@ void init_hacl_hash(struct el2_data *el2_data);
 uint64_t get_hacl_hash_sha2_constant_k384_512(int i);
 uint32_t get_hacl_hash_sha2_constant_k224_256(int i);
 
-static u64 inline get_pt_vttbr(u32 vmid)
+static u64 inline 
+
+get_pt_vttbr(u32 vmid)
 {
 	struct el2_data *el2_data = kern_hyp_va((void*)&el2_data_start);
 	if (vmid < COREVISOR) {
@@ -385,4 +474,6 @@ static void inline set_pt_vttbr(u32 vmid, u64 vttbr) {
 	struct el2_data *el2_data = kern_hyp_va((void*)&el2_data_start);
 	el2_data->vm_info[vmid].vttbr = vttbr;
 };
+
+
 #endif /* __ARM_STAGE2_H__ */

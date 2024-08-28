@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/types.h>
 #include <asm/kvm_asm.h>
 #include <asm/kvm_hyp.h>
@@ -53,11 +52,14 @@ static void __hyp_text hvc_enable_s2_trans(void)
 
 	if (!el2_data->installed) {
 		protect_el2_mem();
+#ifdef CONFIG_KERNEL_INT
+		init_s2_page();
+		init_el1_pts();
+#endif
 		el2_data->installed = true;
 	}
 
 	__init_stage2_translation();
-
 	write_sysreg(el2_data->host_vttbr, vttbr_el2);
 	write_sysreg(HCR_HOST_NVHE_FLAGS, hcr_el2);
 	__kvm_flush_vm_context();
@@ -82,7 +84,7 @@ void __hyp_text	handle_host_hvc(struct s2_host_regs *hr)
 	ret = 0;
 	ret64 = 0;
 	callno = hr->regs[0];
-
+		
 	if (callno == HVC_ENABLE_S2_TRANS)
 	{
 		hvc_enable_s2_trans();
@@ -164,6 +166,39 @@ void __hyp_text	handle_host_hvc(struct s2_host_regs *hr)
 	else if (callno == HVC_PHYS_ADDR_IOREMAP)
 	{
 		el2_kvm_phys_addr_ioremap((u32)arg1, arg2, arg3, arg4);
+	}
+	
+#ifdef CONFIG_KERNEL_INT
+	else if (callno == HVC_MLOAD)
+	{
+		ret = el2_load_module(arg1, arg2, arg3, arg4, (u32)arg5);
+		set_host_regs(0, ret);
+	}
+
+	else if (callno == HVC_MFREE)
+	{
+		ret = el2_free_module(arg1);
+		set_host_regs(0, ret);
+	}
+
+	else if (callno == HVC_MOD_INIT_FREE)
+	{
+		ret = el2_free_mod_init(arg1);
+		set_host_regs(0, ret);
+	}
+	else if (callno == HVC_ALLOC_EL0_PGD)
+	{
+		el2_do_alloc_el0_pgd(arg1);
+	}
+	else if (callno == HVC_FREE_EL0_PGD)
+	{
+		el2_do_free_el0_pgd(arg1);
+	}
+#endif
+	else if (callno == HVC_DO_SWITCH_MM)
+	{
+		ret = el2_do_switch_mm(arg1, arg2);
+		set_host_regs(0, ret);
 	}
 	else
 	{

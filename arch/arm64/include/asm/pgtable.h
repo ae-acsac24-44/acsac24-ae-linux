@@ -217,7 +217,7 @@ static inline pmd_t pmd_mkcont(pmd_t pmd)
 }
 
 static inline void set_pte(pte_t *ptep, pte_t pte)
-{
+{	
 	WRITE_ONCE(*ptep, pte);
 
 	/*

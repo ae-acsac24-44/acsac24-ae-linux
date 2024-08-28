@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/types.h>
 #include <asm/kvm_asm.h>
 #include <asm/kvm_hyp.h>
@@ -19,6 +18,11 @@
 #include <asm/spinlock_types.h>
 #include <linux/serial_reg.h>
 
+#ifdef CONFIG_KERNEL_INT
+#include <asm/pgtable.h>
+#include <asm/memory.h>
+#endif 
+
 #include "hypsec.h"
 
 u64 mach_phys_mem_start;
@@ -30,6 +34,23 @@ u64 mach_phys_mem_size;
 #define CRn(_x)		.CRn = _x
 #define CRm(_x) 	.CRm = _x
 #define Op2(_x) 	.Op2 = _x
+
+#ifdef CONFIG_KERNEL_INT
+extern const struct kernel_symbol __start___ksymtab[];
+extern const struct kernel_symbol __stop___ksymtab[];
+extern const struct kernel_symbol __start___ksymtab_gpl[];
+extern const struct kernel_symbol __stop___ksymtab_gpl[];
+extern char vdso_start[], vdso_end[];
+#endif
+
+extern u64 host_s1_mem_base;
+extern u64 host_s1_mem_size;
+extern u64 host_s1_pgtable_mem_base;
+extern u64 host_s1_pgtable_mem_size;
+extern u64 host_s1_module_ro_base;
+extern u64 host_s1_module_ro_size;
+extern u64 host_s1_module_text_base;
+extern u64 host_s1_module_text_size;
 
 #define SYS_DESC(reg)					\
 	Op0(sys_reg_Op0(reg)), Op1(sys_reg_Op1(reg)),	\
@@ -196,6 +217,7 @@ void init_el2_data_page(void)
 	memset(el2_data->vm_info, 0,
 		sizeof(struct el2_vm_info) * EL2_VM_INFO_SIZE);
 	el2_data->last_remap_ptr = 0;
+	
 
 	pool_start = el2_data->page_pool_start + STAGE2_CORE_PAGES_SIZE + STAGE2_HOST_POOL_SIZE;
 	for (i = 1; i < EL2_VM_INFO_SIZE - 1; i++) {
@@ -276,6 +298,48 @@ void init_el2_data_page(void)
 	el2_memcpy(el2_data->key, key, 16);
 	el2_memcpy(el2_data->iv, iv, 16);
 
+	el2_data->host_s1_mem_base = host_s1_mem_base;
+	el2_data->host_s1_mem_size = host_s1_mem_size;
+
+	/* kernel page table pool */
+	el2_data->host_s1_pgtable_mem_base = host_s1_pgtable_mem_base;
+	el2_data->host_s1_pgtable_mem_size = host_s1_pgtable_mem_size;
+
+	/* kernel module text section pool */
+	el2_data->host_s1_module_text_base = host_s1_module_text_base;
+	el2_data->host_s1_module_text_size = host_s1_module_text_size;
+
+	/* kernel module ro section pool */
+	el2_data->host_s1_module_ro_base = host_s1_module_ro_base;
+	el2_data->host_s1_module_ro_size = host_s1_module_ro_size;
+
+
+#ifdef CONFIG_KERNEL_INT
+	el2_data->text				= __pa_symbol(_text);
+	el2_data->etext				= __pa_symbol(_etext);
+	el2_data->rodata			= __pa_symbol(__start_rodata);
+	el2_data->erodata			= __pa_symbol(__inittext_begin);
+	el2_data->vdso_start		= __pa_symbol(vdso_start);
+	el2_data->vdso_end			= __pa_symbol(vdso_end);
+	el2_data->init_text_begin 	= __pa_symbol(__inittext_begin);
+	el2_data->init_text_end 	= __pa_symbol(__inittext_end);
+	el2_data->data 				= __pa_symbol(_data);
+	el2_data->edata 			= __pa_symbol(_end);
+	el2_data->host_ttbr1 		= __pa_symbol(swapper_pg_dir);
+	el2_data->host_zero_page	= __pa_symbol(empty_zero_page);
+	el2_data->kimage_voff 		= kimage_voffset; 
+	el2_data->next_modid 		= 0UL; 
+	memset(&el2_data->mod_info, 0, sizeof(struct el2_mod)*EL2_MOD_INFO_SIZE);
+	
+	el2_data->kernel_symtab.start_ksymtab 	= __pa_symbol(__start___ksymtab);
+	el2_data->kernel_symtab.stop_ksymtab	= __pa_symbol(__stop___ksymtab);
+
+	el2_data->kernel_symtab.start_ksymtab_gpl 	= __pa_symbol(__start___ksymtab_gpl);
+	el2_data->kernel_symtab.stop_ksymtab_gpl 	= __pa_symbol(__stop___ksymtab_gpl);
+
+	/* It is recommended tcr register cannot be modified after booting */
+	el2_data->host_tcr_flag = read_sysreg(tcr_el1) & INVALID64;
+#endif
 	return;
 }
 
@@ -463,6 +527,7 @@ struct kvm_vcpu* hypsec_alloc_vcpu(u32 vmid, int vcpu_id)
 	return &shared_data->vcpu_pool[index];
 }
 
+
 int el2_set_boot_info(u32 vmid, unsigned long load_addr,
 			unsigned long size, int type)
 {
@@ -549,4 +614,29 @@ void el2_smmu_clear(u64 iova, u32 cbndx, u32 num)
 void hypsec_phys_addr_ioremap(u32 vmid, u64 gpa, u64 pa, u64 size)
 {
 	kvm_call_core(HVC_PHYS_ADDR_IOREMAP, vmid, gpa, pa, size);
+}
+
+u32 el2_mod_checksum(u64 p_hdr, u64 mod_percpu, u64 mod_arch, u64 checklists, u32 entsize)
+{
+	kvm_call_core(HVC_MLOAD, p_hdr, mod_percpu, mod_arch, checklists, entsize);
+}
+
+u32 hyp_unload_init_mod(u32 mod_id)
+{
+	kvm_call_core(HVC_MOD_INIT_FREE, mod_id);
+}
+
+u32 hyp_free_module(u32 mod_id)
+{
+	kvm_call_core(HVC_MFREE, mod_id);
+}
+
+void hyp_alloc_el0_pgd(u64 addr)
+{
+	kvm_call_core(HVC_ALLOC_EL0_PGD, addr);
+}
+
+void hyp_free_el0_pgd(u64 addr)
+{
+	kvm_call_core(HVC_FREE_EL0_PGD, addr);
 }

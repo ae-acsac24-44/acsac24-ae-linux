@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef HYPSEC_CONSTANTS_H
 #define HYPSEC_CONSTANTS_H
 
@@ -8,9 +7,12 @@
 
 #define PT_POOL_START 0x10000
 #define PT_POOL_PER_VM STAGE2_VM_POOL_SIZE
-#define MAX_VM_NUM 56 
+#define MAX_VM_NUM 64 
 #define MAX_CTXT_NUM 1024
 #define MAX_LOAD_INFO_NUM 5
+
+#define MAX_MOD_NUM		16
+
 /*
 #define KVM_PHYS_SIZE 4096UL
 #define PAGE_SIZE 4096UL
@@ -49,6 +51,24 @@
 #define HOSTVISOR 0
 #define MAX_SHARE_COUNT 100
 #define UNUSED 0
+
+#ifdef CONFIG_KERNEL_INT
+#define NONE 0
+#define EL1_PGD 1
+#define EL1_PUD 2
+#define EL1_PMD 3
+#define EL1_PTE 4
+#define EL1_INIT 6
+#define EL1_KCODE 7
+#define EL1_DATA 8
+#define EL1_RODATA 9
+#define EL0_PGD 10
+#define EL1_AUTH 11
+#define EL1_MOD_txt 12
+#define EL1_MOD_ro 13
+#endif 
+
+
 //#define READY 1
 //#define VERIFIED 2
 //#define ACTIVE 3
@@ -102,6 +122,17 @@
 #define PSTATE_FAULT_BITS_64 11UL
 
 // Micros
+#define HUGE_PMD_SHIFT      21
+#define HUGE_PMD_SIZE		(_AC(1, UL) << HUGE_PMD_SHIFT)
+#define HUGE_PMD_MASK		(~(HUGE_PMD_SIZE-1))
+#define HUGE_PUD_SHIFT      30
+#define HUGE_PUD_SIZE		(_AC(1, UL) << HUGE_PUD_SHIFT)
+#define HUGE_PUD_MASK		(~(HUGE_PUD_SIZE-1))
+#define PGD_SHIFT           39
+#define PUD_SHIFT           30
+#define PMD_SHIFT           21
+#define PTE_SHIFT           12
+
 
 #define PT_POOL_SIZE (STAGE2_PAGES_SIZE)
 #define phys_page(addr) ((addr) & PHYS_MASK & PAGE_MASK)
@@ -110,7 +141,10 @@
 #define pmd_idx(addr)	pmd_index(addr)
 #define pte_idx(addr)	pte_index(addr)
 #define v_pmd_table(pmd)	(pmd & PMD_TYPE_MASK)
+#define v_pud_table(pud)	(pud & PUD_TYPE_MASK)
 #define writable(pte) (((pte) >> 2UL) & 1UL)
+#define phys_pmd_huge(addr) ((addr) & PHYS_MASK & HUGE_PMD_MASK)
+#define phys_pud_huge(addr) ((addr) & PHYS_MASK & HUGE_PUD_MASK)
 
 #define SMMU_HOST_OFFSET 1000000000UL
 #define PMD_PAGE_NUM	512

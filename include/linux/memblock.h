@@ -339,6 +339,33 @@ bool memblock_is_region_memory(phys_addr_t base, phys_addr_t size);
 bool memblock_is_reserved(phys_addr_t addr);
 bool memblock_is_region_reserved(phys_addr_t base, phys_addr_t size);
 
+#ifdef CONFIG_VERIFIED_KVM
+extern u64 host_s1_pgtable_mem_base;
+extern u64 host_s1_pgtable_early_mem_base;
+
+static inline phys_addr_t sekvm_memblock_alloc(phys_addr_t size,
+											phys_addr_t align)
+{
+	/* We use the top-down allocation method on early fixed reserved mem */
+	u64 alloc = ALIGN(size, align);
+
+	BUG_ON(!host_s1_pgtable_early_mem_base);
+
+	if (!size)
+			return 0;
+
+	if (host_s1_pgtable_mem_base + alloc > host_s1_pgtable_early_mem_base)
+	{
+			pr_info("[SeKVM]: Failed to get reserved mem\n");
+			return 0;
+	}
+
+	host_s1_pgtable_early_mem_base -= alloc;
+
+	return host_s1_pgtable_early_mem_base;
+}
+#endif
+
 extern void __memblock_dump_all(void);
 
 static inline void memblock_dump_all(void)

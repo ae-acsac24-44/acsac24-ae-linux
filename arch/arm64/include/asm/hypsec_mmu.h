@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ARM_STAGE2_MMU__
 #define __ARM_STAGE2_MMU__
 
@@ -32,6 +31,13 @@ struct s2_page {
 	int count;
 	u32 vmid;
 	u64 gfn;
+#ifdef CONFIG_KERNEL_INT
+	u32 subid;
+	u32 subcount;
+	u32 dynamic; 	
+	u64 kpt_index; 
+	u64 el1_va; 
+#endif
 };
 
 struct s2_memblock_info {

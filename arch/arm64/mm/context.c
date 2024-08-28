@@ -27,6 +27,10 @@
 #include <asm/smp.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_VERIFIED_KVM
+#include <asm/hypsec_host.h>
+#endif
+
 static u32 asid_bits;
 static DEFINE_RAW_SPINLOCK(cpu_asid_lock);
 
@@ -244,6 +248,27 @@ switch_mm_fastpath:
 	if (!system_uses_ttbr0_pan())
 		cpu_switch_mm(mm->pgd, mm);
 }
+
+#ifdef CONFIG_VERIFIED_KVM
+static bool sec_switch_mm = true;
+u32 hyp_do_switch_mm(pgd_t *pgd, struct mm_struct *mm)
+{
+	if(!sec_switch_mm)
+		return 0;
+
+	u64 ttbr0 = virt_to_phys(pgd);
+	u64 asid = atomic64_read(&mm->context.id);
+
+	u32 ret = kvm_call_core(HVC_DO_SWITCH_MM, ttbr0, asid);
+
+	if (!ret)
+		post_ttbr_update_workaround();
+	else
+		sec_switch_mm = false;
+
+	return (ret == 0)? 1 : 0;
+}
+#endif
 
 /* Errata workaround post TTBRx_EL1 update. */
 asmlinkage void post_ttbr_update_workaround(void)

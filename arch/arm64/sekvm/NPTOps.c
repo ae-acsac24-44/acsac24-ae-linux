@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include "hypsec.h"
 
 /*
@@ -41,9 +40,24 @@ void __hyp_text clear_pfn_host(u64 pfn)
 	pte = walk_npt(HOSTVISOR, pfn * PAGE_SIZE);
 	if (pte != 0UL)
 	{
-		set_npt(HOSTVISOR, pfn * PAGE_SIZE, 3U, 0);
-		kvm_tlb_flush_vmid_ipa_host(pfn * PAGE_SIZE);
-        }
+		if (pte & PUD_MARK)
+		{
+			/*
+			 * No support for clearing PUD page
+			 */
+			v_panic();
+		}
+		else if (v_pmd_table(pte) == PMD_TYPE_TABLE)
+		{
+			set_npt(HOSTVISOR, pfn * PAGE_SIZE, 3U, 0);
+			kvm_tlb_flush_vmid_ipa_host(pfn * PAGE_SIZE);
+		}
+		else
+		{
+			set_npt(HOSTVISOR, pfn * PAGE_SIZE, 2U, 0);
+			kvm_tlb_flush_vmid_ipa_host(kint_pfn_pmd(pfn));
+		}
+    }
 
 	release_lock_pt(HOSTVISOR);
 }

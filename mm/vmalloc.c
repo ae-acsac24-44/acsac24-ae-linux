@@ -1334,6 +1334,23 @@ void unmap_kernel_range(unsigned long addr, unsigned long size)
 }
 EXPORT_SYMBOL_GPL(unmap_kernel_range);
 
+#ifdef CONFIG_VERIFIED_KVM
+extern int sekvm_vmap_page_range(unsigned long start, unsigned long end,
+			   pgprot_t prot, unsigned long flags);
+static int sekvm_map_vm_area(struct vm_struct *area, pgprot_t prot)
+{
+	unsigned long addr = (unsigned long)area->addr;
+	unsigned long end = addr + get_vm_area_size(area);
+	unsigned long flags = area->flags;
+	int err;
+
+	err = sekvm_vmap_page_range(addr, end, prot, flags);
+	flush_cache_vmap(addr, end);
+
+	return err > 0 ? 0 : err;
+}
+#endif
+
 int map_vm_area(struct vm_struct *area, pgprot_t prot, struct page **pages)
 {
 	unsigned long addr = (unsigned long)area->addr;
@@ -1516,6 +1533,11 @@ static void __vunmap(const void *addr, int deallocate_pages)
 	debug_check_no_obj_freed(area->addr, get_vm_area_size(area));
 
 	remove_vm_area(addr);
+#ifdef CONFIG_VERIFIED_KVM
+	/* In SeKVM, module area area->pages[] == NULL */
+	if (area->flags & VM_SEKVM_RO || area->flags & VM_SEKVM_TXT)
+			deallocate_pages = 0;
+#endif
 	if (deallocate_pages) {
 		int i;
 
@@ -1665,6 +1687,23 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 	array_size = (nr_pages * sizeof(struct page *));
 
 	area->nr_pages = nr_pages;
+
+#ifdef CONFIG_VERIFIED_KVM
+	if ((area->flags & VM_SEKVM_TMP)
+		|| ((area->flags & VM_SEKVM_TXT || area->flags & VM_SEKVM_RO)
+		&& within_module_range((u64)area->addr)
+		&& within_module_range((u64)(area->addr + area->size))))
+	{
+		area->pages = NULL;
+		if (sekvm_map_vm_area(area, prot)) {
+			remove_vm_area(area->addr);
+			kfree(area);
+			return NULL;
+		}
+		return area->addr;
+	}
+#endif
+
 	/* Please note that the recursion is strictly bounded. */
 	if (array_size > PAGE_SIZE) {
 		pages = __vmalloc_node(array_size, 1, nested_gfp|highmem_mask,

@@ -522,6 +522,14 @@ static inline bool within_module(unsigned long addr, const struct module *mod)
 	return within_module_init(addr, mod) || within_module_core(addr, mod);
 }
 
+#ifdef CONFIG_VERIFIED_KVM
+static inline bool within_module_range(unsigned long addr)
+{
+	return module_alloc_base <= addr &&
+			addr < (module_alloc_base + MODULES_VSIZE);
+}
+#endif
+
 /* Search for module by name: must hold module_mutex. */
 struct module *find_module(const char *name);
 

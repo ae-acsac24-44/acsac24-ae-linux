@@ -55,9 +55,17 @@ static inline void cpu_set_reserved_ttbr0(void)
 	isb();
 }
 
+#ifdef CONFIG_VERIFIED_KVM
+extern bool sekvm_installed;
+u32 hyp_do_switch_mm(pgd_t *pgd, struct mm_struct *mm);
+#endif
 static inline void cpu_switch_mm(pgd_t *pgd, struct mm_struct *mm)
 {
 	BUG_ON(pgd == swapper_pg_dir);
+#ifdef CONFIG_VERIFIED_KVM
+	if (sekvm_installed && hyp_do_switch_mm(pgd, mm))
+		return;
+#endif
 	cpu_set_reserved_ttbr0();
 	cpu_do_switch_mm(virt_to_phys(pgd),mm);
 }

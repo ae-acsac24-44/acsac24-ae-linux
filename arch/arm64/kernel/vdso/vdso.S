@@ -22,7 +22,7 @@
 #include <asm/page.h>
 
 	.globl vdso_start, vdso_end
-	.section .rodata
+	.section .data..ro_after_init
 	.balign PAGE_SIZE
 vdso_start:
 	.incbin "arch/arm64/kernel/vdso/vdso.so"

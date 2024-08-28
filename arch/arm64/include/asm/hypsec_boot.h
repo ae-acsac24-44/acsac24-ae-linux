@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __ARM_STAGE2_BOOT__
 #define __ARM_STAGE2_BOOT__
 
@@ -8,6 +7,11 @@
 #define EL2_MAX_VMID		65
 //Hostvisor:0 + 32 VMIDs + 1 COREVISOR
 #define EL2_VM_INFO_SIZE	EL2_MAX_VMID + 1
+
+#ifdef CONFIG_KERNEL_INT
+#define EL2_MAX_MODID		15
+#define EL2_MOD_INFO_SIZE	EL2_MAX_VMID + 1
+#endif 
 
 #define HYPSEC_MAX_VCPUS	4
 #define HYPSEC_MAX_CPUS		16	

@@ -45,7 +45,7 @@ static void __hyp_text __deactivate_traps_common(void)
 	set_pmuserenr_el0(0);
 }
 
-static void __hyp_text __activate_traps_nvhe(struct kvm_vcpu *vcpu)
+static void __hyp_text __activate_traps_nvhe(struct kvm_vcpu *vcpu, unsigned long vm_vector_ptr)
 {
 	u64 val;
 
@@ -55,9 +55,10 @@ static void __hyp_text __activate_traps_nvhe(struct kvm_vcpu *vcpu)
 	val |= CPTR_EL2_TTA | CPTR_EL2_TZ;
 
 	set_cptr_el2(val);
+	set_vbar_el2(vm_vector_ptr);
 }
 
-static void __hyp_text __activate_traps(struct kvm_vcpu *vcpu)
+static void __hyp_text __activate_traps(struct kvm_vcpu *vcpu, unsigned long vm_vector_ptr)
 {
 	u64 hcr = HCR_HYPSEC_VM_FLAGS;
 
@@ -71,10 +72,10 @@ static void __hyp_text __activate_traps(struct kvm_vcpu *vcpu)
 
 	/* We don't support RAS_EXTN for now in HypSec */
 
-	__activate_traps_nvhe(vcpu);
+	__activate_traps_nvhe(vcpu, vm_vector_ptr);
 }
 
-static void __hyp_text __deactivate_traps_nvhe(void)
+static void __hyp_text __deactivate_traps_nvhe(unsigned long hyp_vector_ptr)
 {
 	__deactivate_traps_common();
 	/*
@@ -84,11 +85,12 @@ static void __hyp_text __deactivate_traps_nvhe(void)
 	set_mdcr_el2(0);
 
 	set_cptr_el2(CPTR_EL2_DEFAULT);
+	set_vbar_el2(hyp_vector_ptr);
 }
 
-static void __hyp_text __deactivate_traps(struct kvm_vcpu *vcpu)
+static void __hyp_text __deactivate_traps(struct kvm_vcpu *vcpu, unsigned long hyp_vector_ptr)
 {
-	__deactivate_traps_nvhe();
+	__deactivate_traps_nvhe(hyp_vector_ptr);
 }
 
 void activate_traps_vhe_load(struct kvm_vcpu *vcpu)
@@ -273,6 +275,8 @@ int __hyp_text __kvm_vcpu_run_nvhe(u32 vmid, int vcpu_id)
 	struct el2_data *el2_data;
 	struct kvm_vcpu *vcpu;
 	struct shadow_vcpu_context *prot_ctxt;
+	unsigned long hyp_vector_ptr; 
+	unsigned long vm_vector_ptr; 
 
 	/* check if vm is verified and vcpu is already active. */
 	hypsec_set_vcpu_active(vmid, vcpu_id);
@@ -285,6 +289,8 @@ int __hyp_text __kvm_vcpu_run_nvhe(u32 vmid, int vcpu_id)
 	host_ctxt = kern_hyp_va(vcpu->arch.host_cpu_context);
 	host_ctxt->__hyp_running_vcpu = vcpu;
 	shadow_ctxt = (struct kvm_cpu_context *)prot_ctxt;
+	hyp_vector_ptr = (unsigned long)kern_hyp_va(kvm_ksym_ref(__kvm_hyp_vector));
+	vm_vector_ptr = (unsigned long)kvm_get_vm_vector();
 
 	__sysreg_save_state_nvhe(host_ctxt);
 
@@ -292,7 +298,7 @@ int __hyp_text __kvm_vcpu_run_nvhe(u32 vmid, int vcpu_id)
 	//__restore_shadow_kvm_regs(vcpu, prot_ctxt);
 	restore_shadow_kvm_regs();
 
-	__activate_traps(vcpu);
+	__activate_traps(vcpu,vm_vector_ptr);
 	__activate_vm(vmid & 0xff);
 	if (vcpu->arch.was_preempted) {
 		hypsec_tlb_flush_local_vmid();
@@ -329,7 +335,7 @@ int __hyp_text __kvm_vcpu_run_nvhe(u32 vmid, int vcpu_id)
 	__timer_disable_traps(vcpu);
 	__hyp_vgic_save_state(vcpu);
 
-	__deactivate_traps(vcpu);
+	__deactivate_traps(vcpu, hyp_vector_ptr);
 	__deactivate_vm(vcpu);
 	__host_el2_restore_state(el2_data);
 

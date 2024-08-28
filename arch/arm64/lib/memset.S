@@ -208,8 +208,8 @@ ENTRY(memset)
 2:
 	sub	count, count, zva_len_x
 3:
-	dc	zva, dst
-	add	dst, dst, zva_len_x
+	dc zva, dst
+	add dst, dst, zva_len_x
 	subs	count, count, zva_len_x
 	b.ge	3b
 	ands	count, count, zva_bits_x

@@ -46,8 +46,24 @@ static void * __ref __earlyonly_bootmem_alloc(int node,
 					    BOOTMEM_ALLOC_ACCESSIBLE, node);
 }
 
+#ifdef CONFIG_VERIFIED_KVM
+extern void *host_alloc_pt_pages(unsigned short order);
+static void * __ref __sekvm_bootmem_alloc(phys_addr_t size,
+				phys_addr_t align)
+{
+	return host_alloc_pt_pages(0);
+}
+#endif
+
 static void *vmemmap_buf;
 static void *vmemmap_buf_end;
+
+#ifdef CONFIG_VERIFIED_KVM
+void * __meminit sekvm_vmemmap_alloc_block(unsigned long size, int node)
+{
+	return __sekvm_bootmem_alloc(size, PAGE_SIZE);
+}
+#endif
 
 void * __meminit vmemmap_alloc_block(unsigned long size, int node)
 {
@@ -165,6 +181,19 @@ pte_t * __meminit vmemmap_pte_populate(pmd_t *pmd, unsigned long addr, int node)
 	return pte;
 }
 
+#ifdef CONFIG_VERIFIED_KVM
+static void * __meminit sekvm_vmemmap_alloc_block_zero(unsigned long size, int node)
+{
+	void *p = sekvm_vmemmap_alloc_block(size, node);
+
+	if (!p)
+		return NULL;
+	memset(p, 0, size);
+
+	return p;
+}
+#endif
+
 static void * __meminit vmemmap_alloc_block_zero(unsigned long size, int node)
 {
 	void *p = vmemmap_alloc_block(size, node);
@@ -180,7 +209,11 @@ pmd_t * __meminit vmemmap_pmd_populate(pud_t *pud, unsigned long addr, int node)
 {
 	pmd_t *pmd = pmd_offset(pud, addr);
 	if (pmd_none(*pmd)) {
+#ifndef CONFIG_VERIFIED_KVM
 		void *p = vmemmap_alloc_block_zero(PAGE_SIZE, node);
+#else
+		void *p = sekvm_vmemmap_alloc_block_zero(PAGE_SIZE, node);
+#endif
 		if (!p)
 			return NULL;
 		pmd_populate_kernel(&init_mm, pmd, p);
@@ -192,7 +225,11 @@ pud_t * __meminit vmemmap_pud_populate(p4d_t *p4d, unsigned long addr, int node)
 {
 	pud_t *pud = pud_offset(p4d, addr);
 	if (pud_none(*pud)) {
+#ifndef CONFIG_VERIFIED_KVM
 		void *p = vmemmap_alloc_block_zero(PAGE_SIZE, node);
+#else
+		void *p = sekvm_vmemmap_alloc_block_zero(PAGE_SIZE, node);
+#endif
 		if (!p)
 			return NULL;
 		pud_populate(&init_mm, pud, p);
@@ -216,7 +253,11 @@ pgd_t * __meminit vmemmap_pgd_populate(unsigned long addr, int node)
 {
 	pgd_t *pgd = pgd_offset_k(addr);
 	if (pgd_none(*pgd)) {
+#ifndef CONFIG_VERIFIED_KVM
 		void *p = vmemmap_alloc_block_zero(PAGE_SIZE, node);
+#else
+		void *p = sekvm_vmemmap_alloc_block_zero(PAGE_SIZE, node);
+#endif
 		if (!p)
 			return NULL;
 		pgd_populate(&init_mm, pgd, p);

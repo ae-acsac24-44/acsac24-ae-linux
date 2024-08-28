@@ -40,6 +40,7 @@
 #include <linux/mm.h>
 #include <linux/kexec.h>
 #include <linux/crash_dump.h>
+#include <linux/kvm_host.h>
 
 #include <asm/boot.h>
 #include <asm/fixmap.h>
@@ -457,6 +458,9 @@ void __init arm64_memblock_init(void)
 	 * pagetables with memblock.
 	 */
 	memblock_reserve(__pa_symbol(_text), _end - _text);
+
+	early_sekvm_hyp_reserve();
+
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start) {
 		memblock_reserve(initrd_start, initrd_end - initrd_start);
@@ -486,6 +490,7 @@ void __init arm64_memblock_init(void)
 	memblock_allow_resize();
 }
 
+
 void __init bootmem_init(void)
 {
 	unsigned long min, max;
@@ -498,6 +503,8 @@ void __init bootmem_init(void)
 	max_pfn = max_low_pfn = max;
 
 	arm64_numa_init();
+
+	sekvm_divide_reserve_mem();
 	/*
 	 * Sparsemem tries to allocate bootmem in memory_present(), so must be
 	 * done after the fixed reservations.
@@ -603,6 +610,49 @@ void __init mem_init(void)
 
 	mem_init_print_info(NULL);
 
+#ifdef CONFIG_KERNEL_INT
+#define MLK(b, t) b, t, ((t) - (b)) >> 10
+#define MLM(b, t) b, t, ((t) - (b)) >> 20
+#define MLK_ROUNDUP(b, t) b, t, DIV_ROUND_UP(((t) - (b)), SZ_1K)
+
+	pr_notice("Virtual kernel memory layout:\n"
+			"    fixmap    : 0x%08lx - 0x%08lx   (%4ld kB)\n"
+			"    vmalloc   : 0x%08lx - 0x%08lx   (%4ld MB)\n"
+			"    lowmem    : 0x%08lx - 0x%08lx   (%4ld MB)\n"
+#ifdef CONFIG_HIGHMEM
+			"    pkmap     : 0x%08lx - 0x%08lx   (%4ld MB)\n"
+#endif
+#ifdef CONFIG_MODULES
+			"    modules   : 0x%08lx - 0x%08lx   (%4ld MB)\n"
+#endif
+			"      .text   : 0x%lx" " - 0x%lx" "   (%4td kB)\n"
+			"      .rodata : 0x%lx" " - 0x%lx" "   (%4td kB)\n"
+			"      .init   : 0x%lx" " - 0x%lx" "   (%4td kB)\n"
+			"      .data   : 0x%lx" " - 0x%lx" "   (%4td kB)\n"
+			"       .bss   : 0x%lx" " - 0x%lx" "   (%4td kB)\n",
+
+			MLK(FIXADDR_START, FIXADDR_START + FIXADDR_SIZE),
+			MLM(VMALLOC_START, VMALLOC_END),
+			MLM(PAGE_OFFSET, (unsigned long)high_memory),
+#ifdef CONFIG_HIGHMEM
+			MLM(PKMAP_BASE, (PKMAP_BASE) + (LAST_PKMAP) *
+				(PAGE_SIZE)),
+#endif
+#ifdef CONFIG_MODULES
+			MLM(MODULES_VADDR, MODULES_END),
+#endif
+
+			MLK_ROUNDUP(_text, _etext),
+			MLK_ROUNDUP(__start_rodata, __inittext_begin),
+			MLK_ROUNDUP(__init_begin, __init_end),
+			MLK_ROUNDUP(_sdata, _edata),
+			MLK_ROUNDUP(__bss_start, __bss_stop));
+
+#undef MLK
+#undef MLM
+#undef MLK_ROUNDUP
+#endif
+
 	/*
 	 * Check boundaries twice: Some fundamental inconsistencies can be
 	 * detected at build time already.
@@ -639,6 +689,7 @@ void free_initmem(void)
 	 * prevents the region from being reused for kernel modules, which
 	 * is not supported by kallsyms.
 	 */
+	
 	unmap_kernel_range((u64)__init_begin, (u64)(__init_end - __init_begin));
 }
 

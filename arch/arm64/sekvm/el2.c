@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include <linux/types.h>
 #include <asm/kvm_asm.h>
 #include <asm/kvm_hyp.h>

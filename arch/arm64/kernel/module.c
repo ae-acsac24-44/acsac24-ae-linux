@@ -68,6 +68,27 @@ void *module_alloc(unsigned long size)
 	return p;
 }
 
+#ifdef CONFIG_VERIFIED_KVM
+void *sekvm_module_alloc(unsigned long flag, unsigned long size)
+{
+	gfp_t gfp_mask = GFP_KERNEL;
+	void *p;
+
+
+	if (flag & VM_SEKVM_TMP)
+		p = __vmalloc_node_range(size, 1, VMALLOC_START, VMALLOC_END,
+				gfp_mask | __GFP_NOWARN, PAGE_KERNEL, flag,
+				NUMA_NO_NODE, __builtin_return_address(0));
+	else
+		p = __vmalloc_node_range(size, MODULE_ALIGN, module_alloc_base,
+				module_alloc_base + MODULES_VSIZE,
+				gfp_mask, PAGE_KERNEL_EXEC, flag,
+				NUMA_NO_NODE, __builtin_return_address(0));
+
+	return p;
+}
+#endif
+
 enum aarch64_reloc_op {
 	RELOC_OP_NONE,
 	RELOC_OP_ABS,
@@ -205,8 +226,9 @@ static int reloc_insn_adrp(struct module *mod, __le32 *place, u64 val)
 	if (!IS_ENABLED(CONFIG_ARM64_ERRATUM_843419) ||
 	    !cpus_have_const_cap(ARM64_WORKAROUND_843419) ||
 	    ((u64)place & 0xfff) < 0xff8)
-		return reloc_insn_imm(RELOC_OP_PAGE, place, val, 12, 21,
+			return reloc_insn_imm(RELOC_OP_PAGE, place, val, 12, 21,
 				      AARCH64_INSN_IMM_ADR);
+
 
 	/* patch ADRP to ADR if it is in range */
 	if (!reloc_insn_imm(RELOC_OP_PREL, place, val & ~0xfff, 0, 21,
@@ -431,7 +453,7 @@ int apply_relocate_add(Elf64_Shdr *sechdrs,
 			goto overflow;
 
 	}
-
+	
 	return 0;
 
 overflow:

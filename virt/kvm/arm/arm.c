@@ -114,11 +114,18 @@ static void install_el2_runtime(void *discard)
 }
 #endif
 
+#ifdef CONFIG_VERIFIED_KVM
+bool sekvm_installed = false;
+#endif
 int kvm_arch_hardware_setup(void)
 {
 #ifdef CONFIG_VERIFIED_KVM
 	on_each_cpu(install_el2_runtime, NULL, 1);
 	printk("HypSec EL2 runtime is installed\n");
+	sekvm_installed = true;
+#endif
+#ifdef CONFIG_KERNEL_INT
+ 	printk("K-Int EL2 runtime is installed\n");
 #endif
 	return 0;
 }
@@ -1876,7 +1883,6 @@ int kvm_arch_init(void *opaque)
 		kvm_info("VHE mode initialized successfully\n");
 	else
 		kvm_info("Hyp mode initialized successfully\n");
-
 	return 0;
 
 out_hyp:
@@ -1898,4 +1904,4 @@ static int arm_init(void)
 	return rc;
 }
 
-late_initcall(arm_init);
+late_initcall_sync(arm_init);

@@ -363,7 +363,15 @@ alternative_else_nop_endif
 alternative_insn eret, nop, ARM64_UNMAP_KERNEL_AT_EL0
 #ifdef CONFIG_UNMAP_KERNEL_AT_EL0
 	bne	4f
-	msr	far_el1, x30
+#ifdef CONFIG_VERIFIED_KVM
+	/*
+	 * We use tpidrro_el0 instead of far_el1
+	 * as scratch register since TVM bit is enabled.
+	 */
+	msr	tpidrro_el0, x30
+#else
+	msr far_el1, x30
+#endif
 	tramp_alias	x30, tramp_exit_native
 	br	x30
 4:
@@ -1097,7 +1105,12 @@ alternative_insn isb, nop, ARM64_WORKAROUND_QCOM_FALKOR_E1003
 	msr	vbar_el1, x30
 	tramp_unmap_kernel	x30
 	.if	\regsize == 64
+#ifdef CONFIG_VERIFIED_KVM
+	mrs x30, tpidrro_el0
+	msr tpidrro_el0, xzr
+#else
 	mrs	x30, far_el1
+#endif
 	.endif
 	eret
 	.endm

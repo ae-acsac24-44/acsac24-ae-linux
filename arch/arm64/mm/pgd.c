@@ -26,12 +26,24 @@
 #include <asm/page.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_VERIFIED_KVM
+#include <asm/hypsec_host.h>
+#endif
+
 static struct kmem_cache *pgd_cache __ro_after_init;
 
 pgd_t *pgd_alloc(struct mm_struct *mm)
 {
 	if (PGD_SIZE == PAGE_SIZE)
+#ifndef CONFIG_KERNEL_INT
 		return (pgd_t *)__get_free_page(PGALLOC_GFP);
+#else
+	{
+		u64 pgd = (void *)host_alloc_pt_pages(0);
+		hyp_alloc_el0_pgd(__pa(pgd));
+		return (pgd_t *)pgd;
+	}
+#endif
 	else
 		return kmem_cache_alloc(pgd_cache, PGALLOC_GFP);
 }
@@ -39,7 +51,14 @@ pgd_t *pgd_alloc(struct mm_struct *mm)
 void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 {
 	if (PGD_SIZE == PAGE_SIZE)
+#ifndef CONFIG_KERNEL_INT
 		free_page((unsigned long)pgd);
+#else
+	{
+		hyp_free_el0_pgd(__pa(pgd));
+		host_free_pt_pages((unsigned long)pgd);
+	}
+#endif
 	else
 		kmem_cache_free(pgd_cache, pgd);
 }

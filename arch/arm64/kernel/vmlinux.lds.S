@@ -68,6 +68,7 @@ jiffies = jiffies_64;
 #define TRAMP_TEXT
 #endif
 
+
 /*
  * The size of the PE/COFF section that covers the kernel image, which
  * runs from stext to _edata, must be a round multiple of the PE/COFF
@@ -130,15 +131,22 @@ SECTIONS
 		. = ALIGN(16);
 		*(.got)			/* Global offset table		*/
 	}
-
+#ifndef CONFIG_VERIFIED_KVM
 	. = ALIGN(SEGMENT_ALIGN);
+#else
+	. = ALIGN(SZ_2M);
+#endif
 	_etext = .;			/* End of text section */
 
 	RO_DATA(PAGE_SIZE)		/* everything from this point to     */
 	EXCEPTION_TABLE(8)		/* __init_begin will be marked RO NX */
 	NOTES
 
+#ifndef CONFIG_VERIFIED_KVM
 	. = ALIGN(SEGMENT_ALIGN);
+#else
+	. = ALIGN(SZ_2M);
+#endif
 	__init_begin = .;
 	__inittext_begin = .;
 
@@ -187,6 +195,7 @@ SECTIONS
 	__initdata_end = .;
 	__init_end = .;
 
+	. = ALIGN(SZ_2M);
 	_data = .;
 	_sdata = .;
 	RW_DATA_SECTION(L1_CACHE_BYTES, PAGE_SIZE, THREAD_ALIGN)
@@ -213,12 +222,20 @@ SECTIONS
 	__pecoff_data_rawsize = ABSOLUTE(. - __initdata_begin);
 	_edata = .;
 
+#ifdef CONFIG_VERIFIED_KVM
+	/* Reserved region for Device Tree loaded in m400 machine when booting */
+	. = ALIGN(SEGMENT_ALIGN);
+	dtb_copy_start = .;
+	. += SZ_2M * 4;
+	dtb_copy_end =.;
+#endif
+
 	BSS_SECTION(0, 0, 0)
 
 #ifndef CONFIG_VERIFIED_KVM
 	. = ALIGN(PAGE_SIZE);
 #else
-	. = ALIGN(SEGMENT_ALIGN);
+	. = ALIGN(SZ_2M);
 #endif
 	. = ALIGN(PAGE_SIZE);
 	idmap_pg_dir = .;
@@ -238,9 +255,6 @@ SECTIONS
 	swapper_pg_end = .;
 #ifdef CONFIG_VERIFIED_KVM
 	. = ALIGN(SEGMENT_ALIGN);
-	dtb_copy_start = .;
-	. += SZ_2M * 4;
-	dtb_copy_end =.;
 
 	stage2_pgs_start = .;
 	. += STAGE2_PAGES_SIZE;
@@ -251,7 +265,7 @@ SECTIONS
 	smmu_pgs_end = .;
 
 	stage2_tmp_pgs_start = .;
-	. += PAGE_SIZE;
+	. += STAGE2_TMP_PAGES_SIZE;
 	stage2_tmp_pgs_end = .;
 
 	. = ALIGN(PAGE_SIZE);
@@ -266,6 +280,7 @@ SECTIONS
 #endif
 
 	__pecoff_data_size = ABSOLUTE(. - __initdata_begin);
+	. = ALIGN(SZ_2M);
 	_end = .;
 
 	STABS_DEBUG

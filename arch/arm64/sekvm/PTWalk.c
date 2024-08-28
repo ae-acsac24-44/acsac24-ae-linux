@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include "hypsec.h"
 #include "MmioOps.h"
 
@@ -92,13 +91,25 @@ u64 __hyp_text walk_pte(u32 vmid, u64 pmd, u64 addr)
 	return check64(ret);
 }
 
+void __hyp_text v_set_pud(u32 vmid, u64 pgd, u64 addr, u64 pud)
+{
+	u64 pgd_pa, pud_idx;
+
+	pgd_pa = phys_page(pgd);
+	pud_idx = pud_idx(addr);
+	if (pud != 0UL)
+		pud |= PUD_MARK;
+	pt_store(vmid, pgd_pa | (pud_idx * 8UL), pud);
+}
+
 void __hyp_text v_set_pmd(u32 vmid, u64 pud, u64 addr, u64 pmd)
 {
 	u64 pud_pa, pmd_idx;
 
 	pud_pa = phys_page(pud);
 	pmd_idx = pmd_idx(addr);
-	pmd |= PMD_MARK;
+	if (pmd != 0UL)
+		pmd |= PMD_MARK;
 	pt_store(vmid, pud_pa | (pmd_idx * 8UL), pmd);
 }
 
@@ -107,6 +118,7 @@ void __hyp_text v_set_pte(u32 vmid, u64 pmd, u64 addr, u64 pte)
 	u64 pmd_pa, pte_idx;
 	pmd_pa = phys_page(pmd);
 	pte_idx = pte_idx(addr);
-	pte |= PTE_MARK;
+	if (pte != 0UL)
+		pte |= PTE_MARK;
 	pt_store(vmid, pmd_pa | (pte_idx * 8UL), pte);
 }

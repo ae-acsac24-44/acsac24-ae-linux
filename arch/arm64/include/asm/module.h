@@ -33,6 +33,9 @@ struct mod_arch_specific {
 
 	/* for CONFIG_DYNAMIC_FTRACE */
 	struct plt_entry 	*ftrace_trampoline;
+#ifdef CONFIG_KERNEL_INT
+	u32 kint_modid;
+#endif
 };
 #endif
 

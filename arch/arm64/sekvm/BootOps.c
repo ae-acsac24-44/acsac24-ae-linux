@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include "hypsec.h"
 
 /*
@@ -350,8 +349,8 @@ void __hyp_text __el2_encrypt_buf(u32 vmid, u64 buf, u64 out_buf)
 	else
 	{
 		tmp_pa = get_tmp_buf();
-        	encrypt_buf(vmid, (u64)__el2_va(hpa), (u64)tmp_pa, PAGE_SIZE);
-        	el2_memcpy(__el2_va(out_buf), (void*)tmp_pa, PAGE_SIZE);
+        encrypt_buf(vmid, (u64)__el2_va(hpa), (u64)tmp_pa, PAGE_SIZE);
+        el2_memcpy(__el2_va(out_buf), (void*)tmp_pa, PAGE_SIZE);
 	}
 
 	release_lock_s2page();
@@ -381,7 +380,6 @@ void __hyp_text __el2_decrypt_buf(u32 vmid, void *buf, u32 len)
 
 		decrypt_buf(vmid, (u64)__el2_va(buf), (u64)tmp_pa, len);
 		el2_memcpy(__el2_va(buf), (void*)tmp_pa, PAGE_SIZE);
-
 		release_lock_s2page();
 	}
 

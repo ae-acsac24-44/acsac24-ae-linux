@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include "hypsec.h"
 #include "MmioOps.h"
 
@@ -15,6 +14,7 @@ u32 __hyp_text emulate_mmio(u64 addr, u32 hsr)
 	release_lock_smmu();
 	return ret;
 }
+
 
 void __hyp_text  __el2_free_smmu_pgd(u32 cbndx, u32 index)
 {

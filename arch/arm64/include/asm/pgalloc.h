@@ -29,16 +29,29 @@
 #define PGALLOC_GFP	(GFP_KERNEL | __GFP_ZERO)
 #define PGD_SIZE	(PTRS_PER_PGD * sizeof(pgd_t))
 
+extern void *host_alloc_pt_pages(unsigned short order);
+extern void host_free_pt_pages(unsigned long addr);
+
 #if CONFIG_PGTABLE_LEVELS > 2
 
 static inline pmd_t *pmd_alloc_one(struct mm_struct *mm, unsigned long addr)
 {
+#ifdef CONFIG_VERIFIED_KVM
+	if (addr >= TASK_SIZE)
+		return (pmd_t *)host_alloc_pt_pages(0);
+#endif
 	return (pmd_t *)__get_free_page(PGALLOC_GFP);
 }
 
 static inline void pmd_free(struct mm_struct *mm, pmd_t *pmdp)
 {
 	BUG_ON((unsigned long)pmdp & (PAGE_SIZE-1));
+#ifdef CONFIG_VERIFIED_KVM
+	if (mm == &init_mm) {
+			host_free_pt_pages((unsigned long)pmdp);
+			return;
+	}
+#endif
 	free_page((unsigned long)pmdp);
 }
 
@@ -62,12 +75,22 @@ static inline void __pud_populate(pud_t *pudp, phys_addr_t pmdp, pudval_t prot)
 
 static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long addr)
 {
+#ifdef CONFIG_VERIFIED_KVM
+	if (addr >= TASK_SIZE)
+		return (pud_t *)host_alloc_pt_pages(0);
+#endif
 	return (pud_t *)__get_free_page(PGALLOC_GFP);
 }
 
 static inline void pud_free(struct mm_struct *mm, pud_t *pudp)
 {
 	BUG_ON((unsigned long)pudp & (PAGE_SIZE-1));
+#ifdef CONFIG_VERIFIED_KVM
+	if (mm == &init_mm) {
+			host_free_pt_pages((unsigned long)pudp);
+			return;
+	}
+#endif
 	free_page((unsigned long)pudp);
 }
 
@@ -93,7 +116,12 @@ extern void pgd_free(struct mm_struct *mm, pgd_t *pgdp);
 static inline pte_t *
 pte_alloc_one_kernel(struct mm_struct *mm, unsigned long addr)
 {
+
+#ifdef CONFIG_VERIFIED_KVM
+	return (pte_t *)host_alloc_pt_pages(0);
+#else
 	return (pte_t *)__get_free_page(PGALLOC_GFP);
+#endif
 }
 
 static inline pgtable_t
@@ -117,7 +145,11 @@ pte_alloc_one(struct mm_struct *mm, unsigned long addr)
 static inline void pte_free_kernel(struct mm_struct *mm, pte_t *ptep)
 {
 	if (ptep)
+#ifdef CONFIG_VERIFIED_KVM
+		host_free_pt_pages((unsigned long)ptep);
+#else
 		free_page((unsigned long)ptep);
+#endif
 }
 
 static inline void pte_free(struct mm_struct *mm, pgtable_t pte)

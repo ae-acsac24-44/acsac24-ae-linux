@@ -114,3 +114,7 @@ static void __hyp_text set_hpfar_el2(u64 val)
 	write_sysreg(val, hpfar_el2);
 }
 */
+static void __hyp_text set_vbar_el2(u64 val)
+{
+	write_sysreg(val, vbar_el2);
+}	

@@ -121,6 +121,7 @@
 #define PUD_TABLE_BIT		(_AT(pudval_t, 1) << 1)
 #define PUD_TYPE_MASK		(_AT(pudval_t, 3) << 0)
 #define PUD_TYPE_SECT		(_AT(pudval_t, 1) << 0)
+#define PUD_MARK			(_AT(pudval_t, 1) << 58)
 
 /*
  * Level 2 descriptor (PMD).
@@ -195,6 +196,11 @@
 #define PMD_S2_RDWR		(_AT(pmdval_t, 3) << 6)   /* HAP[2:1] */
 #define PMD_S2_XN		(_AT(pmdval_t, 2) << 53)  /* XN[1:0] */
 
+#ifdef CONFIG_KERNEL_INT
+#define PTE_S2_EL1_XN   (_AT(pteval_t, 1) << 53)
+#define PTE_S2_EL0_XN   (_AT(pteval_t, 0) << 53)
+#endif
+
 #ifdef CONFIG_VERIFIED_KVM
 #define PTE_S2_GUEST		(_AT(pteval_t, 1) << 57)
 #endif
@@ -226,6 +232,7 @@
 #define TCR_TxSZ(x)		(TCR_T0SZ(x) | TCR_T1SZ(x))
 #define TCR_TxSZ_WIDTH		6
 #define TCR_T0SZ_MASK		(((UL(1) << TCR_TxSZ_WIDTH) - 1) << TCR_T0SZ_OFFSET)
+#define TCR_T1SZ_MASK		(((UL(1) << TCR_TxSZ_WIDTH) - 1) << TCR_T1SZ_OFFSET)
 
 #define TCR_IRGN0_SHIFT		8
 #define TCR_IRGN0_MASK		(UL(3) << TCR_IRGN0_SHIFT)

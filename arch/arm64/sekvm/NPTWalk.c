@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 #include "hypsec.h"
 
 /*
@@ -66,16 +65,23 @@ u64 __hyp_text walk_npt(u32 vmid, u64 addr)
 		pud = pgd;
 	}
 
-	pmd = walk_pmd(vmid, pud, addr, 0U);
-
-	if (v_pmd_table(pmd) == PMD_TYPE_TABLE)
+	if (v_pud_table(pud) == PUD_TYPE_TABLE)
 	{
-		pte = walk_pte(vmid, pmd, addr);
-		ret = pte;
+		pmd = walk_pmd(vmid, pud, addr, 0U);
+
+		if (v_pmd_table(pmd) == PMD_TYPE_TABLE)
+		{
+			pte = walk_pte(vmid, pmd, addr);
+			ret = pte;
+		}
+		else
+		{
+			ret = pmd;
+		}
 	}
 	else
 	{
-		ret = pmd;
+		ret = pud;
 	}
 
 	return check64(ret);
@@ -84,9 +90,16 @@ u64 __hyp_text walk_npt(u32 vmid, u64 addr)
 void __hyp_text set_npt(u32 vmid, u64 addr, u32 level, u64 pte)
 {
 	u64 vttbr, pgd, pud, pmd;
+	u64 pfn, perm;
 
 	vttbr = get_pt_vttbr(vmid);	
-	pgd = walk_pgd(vmid, vttbr, addr, 1U);
+	pfn = addr >> PAGE_SHIFT;
+
+	if (vmid == HOSTVISOR && level == 1U)
+		pgd = walk_pgd(vmid, vttbr, addr, 0U);
+	else
+		pgd = walk_pgd(vmid, vttbr, addr, 1U);
+
 	if (vmid == COREVISOR)
 	{
 		pud = walk_pud(vmid, pgd, addr, 1U);
@@ -96,13 +109,29 @@ void __hyp_text set_npt(u32 vmid, u64 addr, u32 level, u64 pte)
 		pud = pgd;
 	}
 
-	if (level == 2U)
+	if (level == 1U)
+	{
+		if (v_pud_table(pud) == PUD_TYPE_TABLE)
+		{
+			/* fallback to PMD */
+			perm = get_pfn_s2_perm(pfn, 2U);
+			pte = kint_mk_pmd(pfn, perm);
+			set_npt(vmid, addr, 2U, pte);
+		}
+		else
+		{
+			v_set_pud(vmid, vttbr, addr, pte);
+		}
+	}
+	else if (level == 2U)
 	{
 		pmd = walk_pmd(vmid, pud, addr, 0U);
 		if (v_pmd_table(pmd) == PMD_TYPE_TABLE)
 		{
-			print_string("\rset existing npt: pmd\n");
-			v_panic();
+			/* fallback to PTE */
+			perm = get_pfn_s2_perm(pfn, 3U);
+			pte = (pfn * PAGE_SIZE) | perm;
+			set_npt(vmid, addr, 3U, pte);
 		}
 		else
 		{
@@ -111,10 +140,17 @@ void __hyp_text set_npt(u32 vmid, u64 addr, u32 level, u64 pte)
 	}
 	else
 	{
-		pmd = walk_pmd(vmid, pud, addr, 1U);
-		if (v_pmd_table(pmd) == PMD_TYPE_TABLE)
+		if (v_pud_table(pud) == PUD_TYPE_TABLE)
 		{
-			v_set_pte(vmid, pmd, addr, pte);
+			pmd = walk_pmd(vmid, pud, addr, 1U);
+			if (v_pmd_table(pmd) == PMD_TYPE_TABLE) {
+				v_set_pte(vmid, pmd, addr, pte);
+			}
+			else
+			{
+				print_string("\rset existing npt: pte\n");
+				v_panic();
+			}
 		}
 		else
 		{

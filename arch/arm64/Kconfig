@@ -597,6 +597,13 @@ config VERIFIED_KVM
 	help
 	  Build verified KVM.
 
+config KERNEL_INT
+	bool "Build KINT"
+	select VERIFIED_KVM
+	default y 
+	help 	
+		Build KINT 
+
 choice
 	prompt "Page size"
 	default ARM64_4K_PAGES
